@@ -19,12 +19,12 @@ DATABASE_URL = os.getenv(
     "postgresql://ticket_user:ticket_pass@127.0.0.1:5432/ticket_db",
 )
 
-INSTANCE_NAME = os.getenv("HOSTNAME", "inventory-local")
+INSTANCE_NAME = os.getenv("INSTANCE_NAME", "inventory-local")
 
 app = FastAPI(
     title="Inventory Service",
     description="Servicio encargado de consultar y descontar asientos con PostgreSQL.",
-    version="1.2.0",
+    version="1.3.0",
 )
 
 
@@ -70,7 +70,12 @@ def health():
         logger.exception("No se pudo conectar con PostgreSQL.")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"La base de datos no está disponible: {type(exc).__name__}",
+            detail={
+                "message": "La base de datos no está disponible.",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "database_url_host": DATABASE_URL.split("@")[1] if "@" in DATABASE_URL else "unknown",
+            },
         ) from exc
 
 
@@ -149,44 +154,45 @@ def get_inventory(event_id: int):
 def reserve_inventory(payload: InventoryRequest):
     try:
         with open_connection() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE inventory
-                    SET
-                        available = available - %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE event_id = %s
-                      AND available >= %s
-                    RETURNING available;
-                    """,
-                    (payload.quantity, payload.event_id, payload.quantity),
-                )
-                row = cursor.fetchone()
-
-                if row is None:
+            with connection.transaction():
+                with connection.cursor() as cursor:
                     cursor.execute(
-                        "SELECT available FROM inventory WHERE event_id = %s;",
-                        (payload.event_id,),
+                        """
+                        UPDATE inventory
+                        SET
+                            available = available - %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE event_id = %s
+                          AND available >= %s
+                        RETURNING available;
+                        """,
+                        (payload.quantity, payload.event_id, payload.quantity),
                     )
-                    current = cursor.fetchone()
+                    row = cursor.fetchone()
 
-                    if current is None:
+                    if row is None:
+                        cursor.execute(
+                            "SELECT available FROM inventory WHERE event_id = %s;",
+                            (payload.event_id,),
+                        )
+                        current = cursor.fetchone()
+
+                        if current is None:
+                            raise HTTPException(
+                                status_code=status.HTTP_404_NOT_FOUND,
+                                detail="Evento no encontrado.",
+                            )
+
                         raise HTTPException(
-                            status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Evento no encontrado.",
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "status": "INSUFFICIENT_INVENTORY",
+                                "message": "No existen suficientes asientos disponibles.",
+                                "available": current["available"],
+                            },
                         )
 
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "status": "INSUFFICIENT_INVENTORY",
-                            "message": "No existen suficientes asientos disponibles.",
-                            "available": current["available"],
-                        },
-                    )
-
-                remaining = row["available"]
+                    remaining = row["available"]
 
         logger.info(
             "Inventario reservado. Evento=%s cantidad=%s restante=%s instancia=%s",
@@ -232,6 +238,7 @@ def reset_inventory():
                     WHERE event_id IN (1, 2, 3);
                     """
                 )
+                connection.commit()
 
                 cursor.execute(
                     "SELECT event_id, available FROM inventory ORDER BY event_id;"
