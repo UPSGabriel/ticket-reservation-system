@@ -1,6 +1,6 @@
 # Parte GABO
 
-## Incluye
+## Contenido
 
 - API Gateway (`api-gateway`)
 - Reservation Service (`reservation-service`)
