@@ -24,7 +24,7 @@ INSTANCE_NAME = os.getenv("HOSTNAME", "inventory-local")
 app = FastAPI(
     title="Inventory Service",
     description="Servicio encargado de consultar y descontar asientos con PostgreSQL.",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 
@@ -33,16 +33,17 @@ class InventoryRequest(BaseModel):
     quantity: int = Field(default=1, ge=1, le=10)
 
 
-async def open_connection():
-    return await psycopg.AsyncConnection.connect(
+def open_connection() -> psycopg.Connection:
+    return psycopg.connect(
         DATABASE_URL,
         connect_timeout=5,
         row_factory=dict_row,
+        sslmode="disable",
     )
 
 
 @app.get("/")
-async def root():
+def root():
     return {
         "service": "inventory-service",
         "message": "Servicio de Inventario con PostgreSQL",
@@ -51,12 +52,12 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+def health():
     try:
-        async with await open_connection() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute("SELECT 1 AS result;")
-                row = await cursor.fetchone()
+        with open_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1 AS result;")
+                row = cursor.fetchone()
 
         return {
             "status": "ok",
@@ -69,16 +70,16 @@ async def health():
         logger.exception("No se pudo conectar con PostgreSQL.")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="La base de datos no está disponible.",
+            detail=f"La base de datos no está disponible: {type(exc).__name__}",
         ) from exc
 
 
 @app.get("/inventory")
-async def get_all_inventory():
+def get_all_inventory():
     try:
-        async with await open_connection() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
+        with open_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
                     """
                     SELECT
                         i.event_id,
@@ -91,7 +92,7 @@ async def get_all_inventory():
                     ORDER BY i.event_id;
                     """
                 )
-                rows = await cursor.fetchall()
+                rows = cursor.fetchall()
 
         return {
             "inventory": rows,
@@ -106,11 +107,11 @@ async def get_all_inventory():
 
 
 @app.get("/inventory/{event_id}")
-async def get_inventory(event_id: int):
+def get_inventory(event_id: int):
     try:
-        async with await open_connection() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
+        with open_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
                     """
                     SELECT
                         i.event_id,
@@ -124,7 +125,7 @@ async def get_inventory(event_id: int):
                     """,
                     (event_id,),
                 )
-                row = await cursor.fetchone()
+                row = cursor.fetchone()
 
         if row is None:
             raise HTTPException(
@@ -145,48 +146,47 @@ async def get_inventory(event_id: int):
 
 
 @app.post("/inventory/reserve")
-async def reserve_inventory(payload: InventoryRequest):
+def reserve_inventory(payload: InventoryRequest):
     try:
-        async with await open_connection() as connection:
-            async with connection.transaction():
-                async with connection.cursor() as cursor:
-                    await cursor.execute(
-                        """
-                        UPDATE inventory
-                        SET
-                            available = available - %s,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE event_id = %s
-                          AND available >= %s
-                        RETURNING available;
-                        """,
-                        (payload.quantity, payload.event_id, payload.quantity),
+        with open_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET
+                        available = available - %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE event_id = %s
+                      AND available >= %s
+                    RETURNING available;
+                    """,
+                    (payload.quantity, payload.event_id, payload.quantity),
+                )
+                row = cursor.fetchone()
+
+                if row is None:
+                    cursor.execute(
+                        "SELECT available FROM inventory WHERE event_id = %s;",
+                        (payload.event_id,),
                     )
-                    row = await cursor.fetchone()
+                    current = cursor.fetchone()
 
-                    if row is None:
-                        await cursor.execute(
-                            "SELECT available FROM inventory WHERE event_id = %s;",
-                            (payload.event_id,),
-                        )
-                        current = await cursor.fetchone()
-
-                        if current is None:
-                            raise HTTPException(
-                                status_code=status.HTTP_404_NOT_FOUND,
-                                detail="Evento no encontrado.",
-                            )
-
+                    if current is None:
                         raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail={
-                                "status": "INSUFFICIENT_INVENTORY",
-                                "message": "No existen suficientes asientos disponibles.",
-                                "available": current["available"],
-                            },
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Evento no encontrado.",
                         )
 
-                    remaining = row["available"]
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "status": "INSUFFICIENT_INVENTORY",
+                            "message": "No existen suficientes asientos disponibles.",
+                            "available": current["available"],
+                        },
+                    )
+
+                remaining = row["available"]
 
         logger.info(
             "Inventario reservado. Evento=%s cantidad=%s restante=%s instancia=%s",
@@ -214,11 +214,11 @@ async def reserve_inventory(payload: InventoryRequest):
 
 
 @app.post("/inventory/reset")
-async def reset_inventory():
+def reset_inventory():
     try:
-        async with await open_connection() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
+        with open_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
                     """
                     UPDATE inventory
                     SET
@@ -232,12 +232,11 @@ async def reset_inventory():
                     WHERE event_id IN (1, 2, 3);
                     """
                 )
-                await connection.commit()
 
-                await cursor.execute(
+                cursor.execute(
                     "SELECT event_id, available FROM inventory ORDER BY event_id;"
                 )
-                rows = await cursor.fetchall()
+                rows = cursor.fetchall()
 
         logger.info("Inventario reiniciado correctamente.")
 
