@@ -18,5 +18,19 @@ services:
       timeout: 5s
       retries: 10
 
+  inventory-service:
+    build:
+      context: ./inventory-service
+    container_name: ticket-inventory
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://ticket_user:ticket_pass@postgres:5432/ticket_db
+      INSTANCE_NAME: inventory-compose
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   ticket_postgres_data:
