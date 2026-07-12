@@ -7,9 +7,7 @@ Sistema distribuido de reservas de entradas con tolerancia a fallos, persistenci
 - Gabriel Córdova
 - Jordy Espinoza
 
-## Estado actual
-
-La parte de Gabriel está implementada:
+## Parte GABO
 
 - API Gateway con rate limiting y bulkhead.
 - Reservation Service con retry, backoff, fallback y persistencia.
@@ -50,7 +48,7 @@ Endpoints:
 - Reservas: `http://localhost:8001/docs`
 - Inventario: `http://localhost:8002/docs`
 
-## Demostración automática de Gabriel
+## Demo GABO
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\gabriel-demo.ps1
@@ -76,12 +74,10 @@ Invoke-RestMethod `
 
 Mientras Payment Service no esté implementado, el estado esperado es `PAYMENT_PENDING`; el inventario se descuenta y la reserva se guarda correctamente.
 
-## Documentación
-
-La explicación, las pruebas, el guion de defensa y las evidencias de Gabriel están en:
+## Parte GABO
 
 ```text
-docs/GABRIEL.md
+docs/GABO.md
 ```
 
 ## Detener el sistema
