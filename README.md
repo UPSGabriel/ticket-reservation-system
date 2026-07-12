@@ -74,7 +74,7 @@ Invoke-RestMethod `
 
 Mientras Payment Service no esté implementado, el estado esperado es `PAYMENT_PENDING`; el inventario se descuenta y la reserva se guarda correctamente.
 
-## Parte GABO
+## Referencias parte GABO
 
 ```text
 docs/GABO.md
