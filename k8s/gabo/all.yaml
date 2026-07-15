@@ -1,0 +1,421 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticket-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ticket-config
+  namespace: ticket-system
+data:
+  POSTGRES_DB: ticket_db
+  POSTGRES_USER: ticket_user
+  DATABASE_URL: postgresql://ticket_user@postgres:5432/ticket_db
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: ticket-system
+data:
+  01-init.sql: |
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        price NUMERIC(10, 2) NOT NULL CHECK (price >= 0)
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory (
+        event_id INTEGER PRIMARY KEY,
+        available INTEGER NOT NULL CHECK (available >= 0),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT fk_inventory_event
+            FOREIGN KEY (event_id)
+            REFERENCES events(id)
+            ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS reservations (
+        id UUID PRIMARY KEY,
+        event_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        status VARCHAR(50) NOT NULL,
+        payment_status VARCHAR(50) NOT NULL,
+        notification_status VARCHAR(50) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT fk_reservation_event
+            FOREIGN KEY (event_id)
+            REFERENCES events(id)
+    );
+
+    INSERT INTO events (id, name, price)
+    VALUES
+        (1, 'Concierto UPS', 10.00),
+        (2, 'Festival Tecnológico', 15.00),
+        (3, 'Último Asiento Demo', 20.00)
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO inventory (event_id, available)
+    VALUES
+        (1, 100),
+        (2, 50),
+        (3, 1)
+    ON CONFLICT (event_id) DO NOTHING;
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: ticket-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ticket-system
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ticket-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: ticket-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: trust
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d/01-init.sql
+              subPath: 01-init.sql
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: postgres-init
+          configMap:
+            name: postgres-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ticket-system
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: ticket-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: inventory-service
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: inventory-service
+      containers:
+        - name: inventory-service
+          image: upsgabriel/ticket-inventory-service:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8002
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ticket-config
+                  key: DATABASE_URL
+            - name: INSTANCE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 400m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: ticket-system
+spec:
+  selector:
+    app: inventory-service
+  ports:
+    - port: 8002
+      targetPort: 8002
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: inventory-service-pdb
+  namespace: ticket-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: inventory-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reservation-service
+  namespace: ticket-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: reservation-service
+  template:
+    metadata:
+      labels:
+        app: reservation-service
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: reservation-service
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: reservation-service
+      containers:
+        - name: reservation-service
+          image: upsgabriel/ticket-reservation-service:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ticket-config
+                  key: DATABASE_URL
+            - name: INVENTORY_SERVICE_URL
+              value: http://inventory-service:8002
+            - name: PAYMENT_SERVICE_URL
+              value: http://payment-service:8003
+            - name: NOTIFICATION_SERVICE_URL
+              value: http://notification-service:8004
+            - name: INSTANCE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reservation-service
+  namespace: ticket-system
+spec:
+  selector:
+    app: reservation-service
+  ports:
+    - port: 8001
+      targetPort: 8001
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: reservation-service-pdb
+  namespace: ticket-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: reservation-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: ticket-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api-gateway
+      containers:
+        - name: api-gateway
+          image: upsgabriel/ticket-api-gateway:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: RESERVATION_SERVICE_URL
+              value: http://reservation-service:8001
+            - name: RATE_LIMIT_MAX_REQUESTS
+              value: "10"
+            - name: RATE_LIMIT_WINDOW_SECONDS
+              value: "10"
+            - name: MAX_CONCURRENT_REQUESTS
+              value: "5"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: ticket-system
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+  namespace: ticket-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api-gateway
