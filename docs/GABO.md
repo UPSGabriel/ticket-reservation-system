@@ -123,6 +123,12 @@ ticket-cluster-control-plane
 ticket-cluster-worker
 ```
 
+Si el control-plane conserva el taint `NoSchedule`, habilitarlo para la práctica:
+
+```powershell
+kubectl taint nodes ticket-cluster-control-plane node-role.kubernetes.io/control-plane:NoSchedule-
+```
+
 ## Acceder a Swagger
 
 Primero detener Docker Compose para liberar el puerto:
@@ -248,6 +254,36 @@ Mecanismos demostrados:
 - Protección de servicios internos.
 - Recuperación automática después de la ventana temporal.
 
+## 4. Base de Datos Intermitente — prueba adicional
+
+Esta prueba adicional termina la parte de infraestructura GABO. No reemplaza el cuarto fallo práctico oficial asignado a Jordy, que será **Pasarela Lenta**.
+
+Objetivo: apagar PostgreSQL temporalmente, comprobar que el sistema responde con un error controlado y demostrar que se recupera sin perder los datos persistidos.
+
+Mantener activo el port-forward del Gateway y ejecutar:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\chaos\gabo-base-datos-intermitente.ps1
+```
+
+Resultado esperado:
+
+```text
+Durante el fallo      -> HTTP 503 o 504
+Después de recuperar -> HTTP 200
+Usuario 401           -> no queda como reserva exitosa
+Usuario 402           -> reserva guardada después de recuperar
+Datos anteriores      -> conservados
+```
+
+Mecanismos demostrados:
+
+- Errores controlados frente a indisponibilidad de PostgreSQL.
+- Retry y backoff entre Reservas e Inventario.
+- Readiness probes.
+- Recuperación automática al restaurar la dependencia.
+- Persistencia mediante PersistentVolumeClaim.
+
 ## Evidencias guardadas
 
 1. Clúster con dos nodos `Ready`.
@@ -262,7 +298,37 @@ Mecanismos demostrados:
 10. PostgreSQL con inventario `0` y una sola reserva exitosa.
 11. Rate limiting: solicitudes 11 a 15 con `429`.
 12. Log `Solicitud rechazada por rate limiting` y recuperación con `404`.
+13. PostgreSQL apagado temporalmente.
+14. Error controlado durante la caída de PostgreSQL.
+15. Reserva exitosa y datos conservados después de restaurarlo.
+
+## Estado final de la parte GABO
+
+```text
+COMPLETO  API Gateway
+COMPLETO  Reservation Service
+COMPLETO  Inventory Service
+COMPLETO  PostgreSQL y persistencia
+COMPLETO  Docker Compose
+COMPLETO  Imágenes Docker Hub
+COMPLETO  Kubernetes de dos nodos
+COMPLETO  Réplicas distribuidas
+COMPLETO  Inventario Fantasma
+COMPLETO  Condición de Carrera
+COMPLETO  Diluvio de Peticiones
+ADICIONAL Base de Datos Intermitente
+```
+
+## Continuación del equipo
+
+La siguiente etapa está descrita en:
+
+```text
+docs/JORDY.md
+```
+
+Jordy debe completar Payment Service, Notification Service, sus imágenes, sus manifiestos Kubernetes y el cuarto fallo práctico oficial **Pasarela Lenta**.
 
 ## Guion corto
 
-> Mi parte implementa la ruta principal de reservas. El cliente entra por el API Gateway, donde aplicamos rate limiting y bulkhead. El Gateway llama al Reservation Service, que coordina Inventario y persiste la reserva en PostgreSQL. Inventario realiza un descuento atómico para evitar vender dos veces el último asiento. En Kubernetes desplegamos dos réplicas de los componentes críticos distribuidas entre dos nodos. Demostramos la caída de una réplica de Inventario sin interrumpir el servicio, una condición de carrera donde solo un comprador obtiene el último asiento y un diluvio de peticiones donde el Gateway bloquea el exceso con código 429 y luego se recupera automáticamente.
+> Mi parte implementa la ruta principal de reservas. El cliente entra por el API Gateway, donde aplicamos rate limiting y bulkhead. El Gateway llama al Reservation Service, que coordina Inventario y persiste la reserva en PostgreSQL. Inventario realiza un descuento atómico para evitar vender dos veces el último asiento. En Kubernetes desplegamos dos réplicas de los componentes críticos distribuidas entre dos nodos. Demostramos la caída de una réplica de Inventario sin interrumpir el servicio, una condición de carrera donde solo un comprador obtiene el último asiento, un diluvio de peticiones donde el Gateway bloquea el exceso con código 429 y una caída temporal de PostgreSQL seguida de recuperación con datos persistentes.
