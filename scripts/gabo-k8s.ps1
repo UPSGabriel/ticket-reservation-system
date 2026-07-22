@@ -16,11 +16,32 @@ function Confirm-Kubectl {
     }
 }
 
+function Enable-ControlPlaneScheduling {
+    $nodes = kubectl get nodes `
+        -l node-role.kubernetes.io/control-plane `
+        -o jsonpath="{.items[*].metadata.name}"
+
+    foreach ($node in ($nodes -split " ")) {
+        if ([string]::IsNullOrWhiteSpace($node)) {
+            continue
+        }
+
+        $taints = kubectl get node $node -o jsonpath="{.spec.taints[*].key}"
+
+        if ($taints -match "node-role.kubernetes.io/control-plane") {
+            Write-Host "Habilitando $node para distribuir las réplicas..."
+            kubectl taint nodes $node node-role.kubernetes.io/control-plane:NoSchedule-
+        }
+    }
+}
+
 Confirm-Kubectl
 
 switch ($Action) {
     "deploy" {
         Write-Host "=== Desplegando Parte GABO en Kubernetes ==="
+        Enable-ControlPlaneScheduling
+
         kubectl apply -f .\k8s\gabo\all.yaml
 
         if ($LASTEXITCODE -ne 0) {
