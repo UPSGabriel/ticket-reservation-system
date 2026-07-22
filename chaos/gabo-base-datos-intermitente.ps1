@@ -15,6 +15,8 @@ function Send-Reservation {
     Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
 
     $client = [System.Net.Http.HttpClient]::new()
+    $client.Timeout = [TimeSpan]::FromSeconds(30)
+
     $body = @{
         event_id = $EventId
         user_id = $UserId
@@ -43,6 +45,26 @@ function Send-Reservation {
     }
 }
 
+function Wait-PostgresStopped {
+    param([string]$Namespace)
+
+    for ($attempt = 1; $attempt -le 60; $attempt++) {
+        $pods = kubectl get pods `
+            -n $Namespace `
+            -l app=postgres `
+            --no-headers `
+            2>$null
+
+        if ([string]::IsNullOrWhiteSpace(($pods | Out-String))) {
+            return
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    throw "PostgreSQL no terminó de apagarse dentro del tiempo esperado."
+}
+
 Write-Host "=== BASE DE DATOS INTERMITENTE ==="
 Write-Host "Este escenario apaga PostgreSQL temporalmente y comprueba la recuperación."
 Write-Host "Mantén activo el port-forward del Gateway en $GatewayUrl"
@@ -60,7 +82,7 @@ try {
 
     Write-Host "`n2. Apagando PostgreSQL..."
     kubectl scale deployment/postgres --replicas=0 -n $Namespace
-    kubectl wait --for=delete pod -l app=postgres -n $Namespace --timeout=120s
+    Wait-PostgresStopped -Namespace $Namespace
 
     Write-Host "`n3. Intentando reservar mientras la base está caída..."
     $duringFailure = Send-Reservation -UserId 401
