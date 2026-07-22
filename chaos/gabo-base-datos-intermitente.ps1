@@ -49,29 +49,35 @@ function Wait-PostgresStopped {
     param([string]$Namespace)
 
     for ($attempt = 1; $attempt -le 60; $attempt++) {
-        $pods = kubectl get pods `
+        $replicas = kubectl get deployment/postgres `
             -n $Namespace `
-            -l app=postgres `
-            --no-headers `
-            2>$null
+            -o jsonpath="{.status.replicas}"
 
-        if ([string]::IsNullOrWhiteSpace(($pods | Out-String))) {
+        if ($LASTEXITCODE -ne 0) {
+            throw "No se pudo consultar el estado de PostgreSQL."
+        }
+
+        if (
+            [string]::IsNullOrWhiteSpace($replicas) -or
+            [int]$replicas -eq 0
+        ) {
+            Write-Host "PostgreSQL apagado correctamente."
             return
         }
 
         Start-Sleep -Seconds 2
     }
 
-    throw "PostgreSQL no terminó de apagarse dentro del tiempo esperado."
+    throw "PostgreSQL no termino de apagarse dentro del tiempo esperado."
 }
 
 Write-Host "=== BASE DE DATOS INTERMITENTE ==="
-Write-Host "Este escenario apaga PostgreSQL temporalmente y comprueba la recuperación."
-Write-Host "Mantén activo el port-forward del Gateway en $GatewayUrl"
+Write-Host "Este escenario apaga PostgreSQL temporalmente y comprueba la recuperacion."
+Write-Host "Manten activo el port-forward del Gateway en $GatewayUrl"
 
 kubectl get deployment postgres -n $Namespace | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "No se encontró PostgreSQL en el namespace $Namespace."
+    throw "No se encontro PostgreSQL en el namespace $Namespace."
 }
 
 Start-Sleep -Seconds 11
@@ -84,7 +90,7 @@ try {
     kubectl scale deployment/postgres --replicas=0 -n $Namespace
     Wait-PostgresStopped -Namespace $Namespace
 
-    Write-Host "`n3. Intentando reservar mientras la base está caída..."
+    Write-Host "`n3. Intentando reservar mientras la base esta caida..."
     $duringFailure = Send-Reservation -UserId 401
     Write-Host "HTTP durante el fallo:" $duringFailure.StatusCode
     Write-Host $duringFailure.Body
@@ -104,10 +110,10 @@ finally {
     kubectl wait --for=condition=ready pod -l app=reservation-service -n $Namespace --timeout=180s
 }
 
-Write-Host "`n5. Probando una reserva después de la recuperación..."
+Write-Host "`n5. Probando una reserva despues de la recuperacion..."
 Start-Sleep -Seconds 5
 $afterRecovery = Send-Reservation -UserId 402
-Write-Host "HTTP después de recuperar:" $afterRecovery.StatusCode
+Write-Host "HTTP despues de recuperar:" $afterRecovery.StatusCode
 Write-Host $afterRecovery.Body
 
 Write-Host "`n6. Verificando persistencia en PostgreSQL..."
@@ -118,5 +124,5 @@ kubectl exec -n $Namespace deployment/postgres -- psql `
 
 Write-Host "`n=== RESULTADO ESPERADO ==="
 Write-Host "Durante el fallo: HTTP 503 o 504 controlado."
-Write-Host "Después de recuperar: HTTP 200 y reserva guardada para el usuario 402."
+Write-Host "Despues de recuperar: HTTP 200 y reserva guardada para el usuario 402."
 Write-Host "Los datos anteriores deben conservarse gracias al volumen persistente."
