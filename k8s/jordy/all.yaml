@@ -44,6 +44,12 @@ spec:
                   fieldPath: metadata.name
             - name: PAYMENT_DELAY_SECONDS
               value: "0"
+            - name: PAYMENT_MIN_DELAY_MS
+              value: "100"
+            - name: PAYMENT_MAX_DELAY_MS
+              value: "800"
+            - name: PAYMENT_FAILURE_RATE
+              value: "0.05"
             - name: PAYMENT_FAILURE_MODE
               value: none
           readinessProbe:
@@ -129,6 +135,12 @@ spec:
                   fieldPath: metadata.name
             - name: NOTIFICATION_DELAY_SECONDS
               value: "0"
+            - name: NOTIFICATION_MIN_DELAY_MS
+              value: "50"
+            - name: NOTIFICATION_MAX_DELAY_MS
+              value: "500"
+            - name: NOTIFICATION_FAILURE_RATE
+              value: "0.05"
             - name: NOTIFICATION_FAILURE_MODE
               value: none
           readinessProbe:
