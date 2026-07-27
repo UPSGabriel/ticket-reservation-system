@@ -2,9 +2,9 @@
 
 ## Estado
 
-Jordy implement? Payment Service, Notification Service, sus im?genes, pruebas autom?ticas, manifiestos Kubernetes y el escenario reproducible Pasarela Lenta.
+Jordy implementó Payment Service, Notification Service, sus imágenes, pruebas automáticas, manifiestos Kubernetes y el escenario reproducible Pasarela Lenta.
 
-La validaci?n operativa final requiere que las im?genes est?n publicadas y que el cl?ster Kubernetes de dos nodos est? disponible.
+La validación operativa final requiere que las imágenes están publicadas y que el clúster Kubernetes de dos nodos está disponible.
 
 ## Payment Service
 
@@ -39,7 +39,7 @@ PAYMENT_FAILURE_RATE
 Reglas:
 
 - Si `PAYMENT_DELAY_SECONDS` es mayor que cero, la demora fija tiene prioridad.
-- Con demora fija en cero, se elige una latencia aleatoria entre el m?nimo y m?ximo.
+- Con demora fija en cero, se elige una latencia aleatoria entre el mínimo y máximo.
 - `PAYMENT_FAILURE_MODE=reject` fuerza HTTP 402 con `REJECTED`.
 - `PAYMENT_FAILURE_RATE` acepta valores entre 0 y 1 para fallos aleatorios.
 - El comportamiento normal devuelve HTTP 200 con `APPROVED`.
@@ -81,7 +81,7 @@ Reglas:
 - `NOTIFICATION_FAILURE_RATE` permite simular correos perdidos aleatoriamente.
 - El comportamiento normal devuelve HTTP 200 con `SENT`.
 
-## Validaci?n autom?tica
+## Validación automática
 
 ```powershell
 Push-Location .\payment-service
@@ -101,7 +101,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\jordy-images.ps1 -Action test
 powershell -ExecutionPolicy Bypass -File .\scripts\jordy-images.ps1 -Action push
 ```
 
-Im?genes:
+Imágenes:
 
 ```text
 upsgabriel/ticket-payment-service:1.0.0
@@ -117,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action dns
 powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action logs
 ```
 
-El manifiesto `k8s/jordy/all.yaml` no crea ni elimina el namespace `ticket-system`. Cada servicio usa dos r?plicas, probes, recursos y distribuci?n preferida entre nodos.
+El manifiesto `k8s/jordy/all.yaml` no crea ni elimina el namespace `ticket-system`. Cada servicio usa dos réplicas, probes, recursos y distribución preferida entre nodos.
 
 ## Pasarela Lenta
 
@@ -134,12 +134,12 @@ El script comprueba:
 3. Fallback `PAYMENT_PENDING` antes de cinco segundos.
 4. Logs de Payment y Reservation.
 5. Persistencia en PostgreSQL.
-6. Restauraci?n a demora cero.
+6. Restauración a demora cero.
 7. Nueva reserva `CONFIRMED`.
 
 ## Correo Perdido
 
-La implementaci?n pr?ctica est? disponible mediante:
+La implementación práctica está disponible mediante:
 
 ```powershell
 kubectl set env deployment/notification-service -n ticket-system NOTIFICATION_FAILURE_MODE=drop NOTIFICATION_FAILURE_RATE=0
@@ -155,11 +155,11 @@ kubectl rollout status deployment/notification-service -n ticket-system --timeou
 
 ## Criterio de cierre operativo
 
-La implementaci?n est? lista. Para cerrar la evidencia deben ejecutarse todav?a:
+La implementación está lista. Para cerrar la evidencia deben ejecutarse todavía:
 
-- Publicaci?n de las im?genes desde la cuenta autorizada.
-- Despliegue real con dos r?plicas.
-- Verificaci?n DNS.
+- Publicación de las imágenes desde la cuenta autorizada.
+- Despliegue real con dos réplicas.
+- Verificación DNS.
 - Reserva normal `CONFIRMED`.
 - Pasarela Lenta `PAYMENT_PENDING`.
 - Capturas y logs indicados en `docs/EVIDENCIAS.md`.

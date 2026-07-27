@@ -1,8 +1,8 @@
-# Evidencias de la pr?ctica
+# Evidencias de la práctica
 
-Este archivo es el ?ndice de evidencias. No se deben marcar elementos como completados hasta ejecutar el cl?ster real.
+Este archivo es el Índice de evidencias. No se deben marcar elementos como completados hasta ejecutar el clúster real.
 
-## Convenci?n de archivos
+## Convención de archivos
 
 Guardar las capturas dentro de `docs/evidencias/`:
 
@@ -29,16 +29,16 @@ Guardar las capturas dentro de `docs/evidencias/`:
 | Evidencia | Comando o fuente | Estado inicial |
 |---|---|---|
 | Dos nodos `Ready` | `kubectl get nodes -o wide` | Pendiente de captura final |
-| R?plicas distribuidas | `kubectl get pods -n ticket-system -o wide` | Pendiente de captura final |
-| Services y DNS | `scripts/jordy-k8s.ps1 -Action dns` | Pendiente de ejecuci?n final |
-| Reserva normal | POST al Gateway | Pendiente de ejecuci?n final |
+| Réplicas distribuidas | `kubectl get pods -n ticket-system -o wide` | Pendiente de captura final |
+| Services y DNS | `scripts/jordy-k8s.ps1 -Action dns` | Pendiente de ejecución final |
+| Reserva normal | POST al Gateway | Pendiente de ejecución final |
 | Inventario Fantasma | `chaos/gabo-inventario-fantasma.ps1` | Probado por Gabriel; falta ordenar captura final |
-| Pasarela Lenta | `chaos/jordy-pasarela-lenta.ps1` | Script listo; falta ejecuci?n Kubernetes |
+| Pasarela Lenta | `chaos/jordy-pasarela-lenta.ps1` | Script listo; falta ejecución Kubernetes |
 | Diluvio | `chaos/gabo-diluvio-peticiones.ps1` | Probado por Gabriel; falta ordenar captura final |
-| Condici?n de Carrera | `chaos/gabo-condicion-carrera.ps1` | Probado por Gabriel; falta ordenar captura final |
-| Recuperaci?n final | pods y reserva nueva | Pendiente de captura final |
+| Condición de Carrera | `chaos/gabo-condicion-carrera.ps1` | Probado por Gabriel; falta ordenar captura final |
+| Recuperación final | pods y reserva nueva | Pendiente de captura final |
 
-## Qu? debe verse en cada fallo
+## Qué debe verse en cada fallo
 
 Cada conjunto debe incluir:
 
@@ -46,6 +46,6 @@ Cada conjunto debe incluir:
 2. Comando que activa el fallo.
 3. Respuesta o estado durante el fallo.
 4. Logs que muestran la defensa.
-5. Estado despu?s de recuperar.
+5. Estado después de recuperar.
 
-Para Pasarela Lenta son imprescindibles `PAYMENT_DELAY_SECONDS=20`, el log de espera, el timeout/fallback, `PAYMENT_PENDING`, la fila PostgreSQL, la restauraci?n a cero y una nueva reserva `CONFIRMED`.
+Para Pasarela Lenta son imprescindibles `PAYMENT_DELAY_SECONDS=20`, el log de espera, el timeout/fallback, `PAYMENT_PENDING`, la fila PostgreSQL, la restauración a cero y una nueva reserva `CONFIRMED`.

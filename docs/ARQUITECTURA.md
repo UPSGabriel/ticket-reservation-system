@@ -1,6 +1,6 @@
 # Arquitectura multinodo
 
-## Flujo l?gico
+## Flujo lógico
 
 ```mermaid
 flowchart TD
@@ -13,43 +13,43 @@ flowchart TD
     I --> DB
 ```
 
-Reservation Service coordina la reserva. Inventory realiza el descuento at?mico, Payment decide el estado del cobro, Notification es una dependencia secundaria y Reservation persiste el resultado en PostgreSQL.
+Reservation Service coordina la reserva. Inventory realiza el descuento atómico, Payment decide el estado del cobro, Notification es una dependencia secundaria y Reservation persiste el resultado en PostgreSQL.
 
-## Distribuci?n Kubernetes
+## Distribución Kubernetes
 
-`kind-config.yaml` crea dos nodos: un `control-plane` y un `worker`. Los cinco servicios HTTP poseen dos r?plicas y reglas de distribuci?n preferida por `kubernetes.io/hostname`.
+`kind-config.yaml` crea dos nodos: un `control-plane` y un `worker`. Los cinco servicios HTTP poseen dos réplicas y reglas de distribución preferida por `kubernetes.io/hostname`.
 
 ```mermaid
 flowchart LR
-    subgraph K[Cl?ster kind ticket-cluster]
+    subgraph K[Clúster kind ticket-cluster]
         subgraph A[Nodo control-plane]
-            G1[Gateway r?plica A]
-            R1[Reservation r?plica A]
-            I1[Inventory r?plica A]
-            P1[Payment r?plica A]
-            N1[Notification r?plica A]
+            G1[Gateway réplica A]
+            R1[Reservation réplica A]
+            I1[Inventory réplica A]
+            P1[Payment réplica A]
+            N1[Notification réplica A]
         end
 
         subgraph B[Nodo worker]
-            G2[Gateway r?plica B]
-            R2[Reservation r?plica B]
-            I2[Inventory r?plica B]
-            P2[Payment r?plica B]
-            N2[Notification r?plica B]
+            G2[Gateway réplica B]
+            R2[Reservation réplica B]
+            I2[Inventory réplica B]
+            P2[Payment réplica B]
+            N2[Notification réplica B]
         end
 
-        DB[(PostgreSQL 1 r?plica)] --- PVC[(PVC 1 GiB)]
+        DB[(PostgreSQL 1 réplica)] --- PVC[(PVC 1 GiB)]
     end
 ```
 
-La posici?n de las r?plicas A/B es una distribuci?n esperada, no un nombre fijo de pod. Se confirma durante la demo con:
+La posición de las réplicas A/B es una distribución esperada, no un nombre fijo de pod. Se confirma durante la demo con:
 
 ```powershell
 kubectl get nodes -o wide
 kubectl get pods -n ticket-system -o wide
 ```
 
-PostgreSQL tiene una sola r?plica y un PVC `ReadWriteOnce`; el nodo concreto lo decide el scheduler. Los componentes cr?ticos Reservation e Inventory permanecen replicados entre los dos nodos.
+PostgreSQL tiene una sola réplica y un PVC `ReadWriteOnce`; el nodo concreto lo decide el scheduler. Los componentes críticos Reservation e Inventory permanecen replicados entre los dos nodos.
 
 ## DNS internos
 
@@ -61,7 +61,7 @@ PostgreSQL tiene una sola r?plica y un PVC `ReadWriteOnce`; el nodo concreto lo 
 | Reservation | Notification | `http://notification-service:8004` |
 | Reservation e Inventory | PostgreSQL | `postgres:5432` |
 
-Comprobaci?n desde Reservation Service:
+Comprobación desde Reservation Service:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action dns
@@ -73,14 +73,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action dns
 flowchart TD
     A[Solicitud de reserva] --> B{Inventario disponible}
     B -- No --> C[HTTP 409]
-    B -- S? --> D[Descuento at?mico]
+    B -- Sí --> D[Descuento atómico]
     D --> E{Payment responde antes de 3 s}
     E -- No --> F[PAYMENT_PENDING]
-    E -- S? --> G{Pago aprobado}
+    E -- Sí --> G{Pago aprobado}
     G -- No --> F
-    G -- S? --> H{Notification enviada}
+    G -- Sí --> H{Notification enviada}
     H -- No --> I[NOTIFICATION_PENDING]
-    H -- S? --> J[CONFIRMED]
+    H -- Sí --> J[CONFIRMED]
     F --> K[(Persistir reserva)]
     I --> K
     J --> K
