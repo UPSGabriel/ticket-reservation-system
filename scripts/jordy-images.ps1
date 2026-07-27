@@ -34,6 +34,29 @@ function Confirm-PortAvailable {
     }
 }
 
+function Remove-TestContainers {
+    foreach ($containerName in @(
+        "ticket-payment-test",
+        "ticket-notification-test"
+    )) {
+        $containerId = docker ps `
+            -aq `
+            --filter "name=^/$containerName$"
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "No se pudo consultar el contenedor $containerName."
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($containerId)) {
+            docker rm -f $containerId | Out-Null
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "No se pudo eliminar el contenedor $containerName."
+            }
+        }
+    }
+}
+
 function Wait-Health {
     param(
         [string]$Url,
@@ -77,7 +100,7 @@ if ($Action -in @("build", "all")) {
 
 if ($Action -in @("test", "all")) {
     Write-Host "=== Probando imagenes JORDY ==="
-    docker rm -f ticket-payment-test ticket-notification-test 2>$null | Out-Null
+    Remove-TestContainers
     Confirm-PortAvailable -Port 8003
     Confirm-PortAvailable -Port 8004
 
@@ -151,7 +174,7 @@ if ($Action -in @("test", "all")) {
             ($notification | ConvertTo-Json -Compress)
     }
     finally {
-        docker rm -f ticket-payment-test ticket-notification-test 2>$null | Out-Null
+        Remove-TestContainers
     }
 }
 
