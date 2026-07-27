@@ -39,24 +39,21 @@ import sys
 import urllib.request
 
 try:
-    with urllib.request.urlopen("$Url", timeout=3) as response:
+    with urllib.request.urlopen(sys.argv[1], timeout=3) as response:
         print(response.read().decode())
         sys.exit(0 if 200 <= response.status < 300 else 1)
 except Exception as exc:
-    print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
     sys.exit(1)
 "@
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        Write-Host (
-            "Comprobando $Url desde Reservation Service " +
-            "(intento $attempt de $MaxAttempts)..."
-        )
+        Write-Host "Comprobando $Url desde Reservation Service (intento $attempt de $MaxAttempts)..."
 
         kubectl exec `
             -n $Namespace `
             deployment/reservation-service `
-            -- python -c $pythonCode
+            -- python -c $pythonCode $Url
         $exitCode = $LASTEXITCODE
 
         if ($exitCode -eq 0) {
@@ -69,10 +66,7 @@ except Exception as exc:
         }
     }
 
-    throw (
-        "Payment Service no estuvo disponible desde Reservation Service " +
-        "despues de $MaxAttempts intentos."
-    )
+    throw "Payment Service no estuvo disponible desde Reservation Service despues de $MaxAttempts intentos."
 }
 
 function Set-PaymentMode {
