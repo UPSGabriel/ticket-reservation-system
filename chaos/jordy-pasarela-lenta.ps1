@@ -27,6 +27,54 @@ function Wait-Deployment {
     Confirm-CommandSucceeded "El deployment $Name no termino su rollout."
 }
 
+function Wait-ServiceReady {
+    param(
+        [string]$Url,
+        [int]$MaxAttempts = 30,
+        [int]$RetrySeconds = 2
+    )
+
+    $pythonCode = @"
+import sys
+import urllib.request
+
+try:
+    with urllib.request.urlopen("$Url", timeout=3) as response:
+        print(response.read().decode())
+        sys.exit(0 if 200 <= response.status < 300 else 1)
+except Exception as exc:
+    print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    sys.exit(1)
+"@
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        Write-Host (
+            "Comprobando $Url desde Reservation Service " +
+            "(intento $attempt de $MaxAttempts)..."
+        )
+
+        kubectl exec `
+            -n $Namespace `
+            deployment/reservation-service `
+            -- python -c $pythonCode
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -eq 0) {
+            Write-Host "Payment Service acepta conexiones desde Reservation Service."
+            return
+        }
+
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds $RetrySeconds
+        }
+    }
+
+    throw (
+        "Payment Service no estuvo disponible desde Reservation Service " +
+        "despues de $MaxAttempts intentos."
+    )
+}
+
 function Set-PaymentMode {
     param([int]$FixedDelaySeconds)
 
@@ -37,6 +85,7 @@ function Set-PaymentMode {
         "PAYMENT_FAILURE_RATE=0"
     Confirm-CommandSucceeded "No se pudo configurar Payment Service."
     Wait-Deployment -Name "payment-service"
+    Wait-ServiceReady -Url "http://payment-service:8003/health"
 }
 
 function Set-StableNotification {
