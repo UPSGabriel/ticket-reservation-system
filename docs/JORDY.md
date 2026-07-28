@@ -1,14 +1,24 @@
 # Parte JORDY
 
-## Estado
+## Responsabilidades principales
 
-Jordy implementó Payment Service, Notification Service, sus imágenes, pruebas automáticas, manifiestos Kubernetes y el escenario reproducible Pasarela Lenta.
+Jordy implementó y validó principalmente:
 
-La validación operativa final requiere que las imágenes están publicadas y que el clúster Kubernetes de dos nodos está disponible.
+- Payment Service.
+- Notification Service.
+- pruebas automáticas de ambos servicios.
+- imágenes Docker de Payment y Notification.
+- manifiestos Kubernetes de ambos servicios.
+- simulación configurable de latencia y fallos.
+- escenario práctico Pasarela Lenta.
+- apoyo en documentación, evidencias y demo.
+- configuración del worker `jordy-node` en el clúster K3s final.
+
+La validación operativa final quedó completada en **DigitalOcean + K3s** con dos nodos reales del clúster.
 
 ## Payment Service
 
-Archivos:
+Archivos principales:
 
 ```text
 payment-service/app/main.py
@@ -38,15 +48,15 @@ PAYMENT_FAILURE_RATE
 
 Reglas:
 
-- Si `PAYMENT_DELAY_SECONDS` es mayor que cero, la demora fija tiene prioridad.
-- Con demora fija en cero, se elige una latencia aleatoria entre el mínimo y máximo.
-- `PAYMENT_FAILURE_MODE=reject` fuerza HTTP 402 con `REJECTED`.
-- `PAYMENT_FAILURE_RATE` acepta valores entre 0 y 1 para fallos aleatorios.
-- El comportamiento normal devuelve HTTP 200 con `APPROVED`.
+- si `PAYMENT_DELAY_SECONDS > 0`, la demora fija tiene prioridad;
+- con demora fija en cero, se elige una latencia aleatoria entre mínimo y máximo;
+- `PAYMENT_FAILURE_MODE=reject` fuerza rechazo del pago;
+- `PAYMENT_FAILURE_RATE` permite fallos aleatorios entre 0 y 1;
+- el comportamiento normal devuelve `APPROVED`.
 
 ## Notification Service
 
-Archivos:
+Archivos principales:
 
 ```text
 notification-service/app/main.py
@@ -76,10 +86,10 @@ NOTIFICATION_FAILURE_RATE
 
 Reglas:
 
-- La demora fija tiene prioridad sobre el rango aleatorio.
-- `NOTIFICATION_FAILURE_MODE=drop` fuerza HTTP 503 con `DROPPED`.
-- `NOTIFICATION_FAILURE_RATE` permite simular correos perdidos aleatoriamente.
-- El comportamiento normal devuelve HTTP 200 con `SENT`.
+- la demora fija tiene prioridad sobre el rango aleatorio;
+- `NOTIFICATION_FAILURE_MODE=drop` permite forzar pérdida de notificación;
+- `NOTIFICATION_FAILURE_RATE` permite simular fallos aleatorios;
+- el comportamiento normal devuelve `SENT`.
 
 ## Validación automática
 
@@ -101,65 +111,170 @@ powershell -ExecutionPolicy Bypass -File .\scripts\jordy-images.ps1 -Action test
 powershell -ExecutionPolicy Bypass -File .\scripts\jordy-images.ps1 -Action push
 ```
 
-Imágenes:
+Imágenes finales:
 
 ```text
 upsgabriel/ticket-payment-service:1.0.0
 upsgabriel/ticket-notification-service:1.0.0
 ```
 
-## Kubernetes
+## Kubernetes / K3s
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action deploy
-powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action status
-powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action dns
-powershell -ExecutionPolicy Bypass -File .\scripts\jordy-k8s.ps1 -Action logs
+El manifiesto principal es:
+
+```text
+k8s/jordy/all.yaml
 ```
 
-El manifiesto `k8s/jordy/all.yaml` no crea ni elimina el namespace `ticket-system`. Cada servicio usa dos réplicas, probes, recursos y distribución preferida entre nodos.
+Payment y Notification usan:
+
+- 2 réplicas;
+- probes;
+- límites/solicitudes de recursos;
+- Services internos;
+- distribución preferida entre hosts.
+
+En el entorno final se desplegaron con:
+
+```bash
+kubectl apply -f k8s/jordy/all.yaml
+kubectl get pods -n ticket-system -o wide
+```
+
+## Worker `jordy-node`
+
+La segunda VM participa activamente como K3s agent/worker.
+
+Comandos de evidencia ejecutados desde la propia VM:
+
+```bash
+hostname
+systemctl status k3s-agent --no-pager
+k3s crictl ps
+```
+
+Se verificó:
+
+```text
+hostname              Jordy-node
+k3s-agent             active (running)
+workloads             Running
+```
+
+En `k3s crictl ps` se observaron contenedores de Reservation, Inventory, Payment, Notification, PostgreSQL y API Gateway ejecutándose en ese nodo.
 
 ## Pasarela Lenta
 
-Mantener el Gateway en `http://localhost:8000` y ejecutar:
+Este es el escenario práctico principal de la parte Jordy.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\chaos\jordy-pasarela-lenta.ps1
+### Preparación estable
+
+```bash
+kubectl set env deployment/payment-service -n ticket-system \
+  PAYMENT_DELAY_SECONDS=0 PAYMENT_FAILURE_MODE=none PAYMENT_FAILURE_RATE=0
+
+kubectl set env deployment/notification-service -n ticket-system \
+  NOTIFICATION_FAILURE_MODE=none NOTIFICATION_FAILURE_RATE=0
+
+kubectl rollout status deployment/payment-service -n ticket-system --timeout=240s
+kubectl rollout status deployment/notification-service -n ticket-system --timeout=240s
 ```
 
-El script comprueba:
+### Inyección
 
-1. Reserva normal `CONFIRMED`.
-2. Demora fija de 20 segundos.
-3. Fallback `PAYMENT_PENDING` antes de cinco segundos.
-4. Logs de Payment y Reservation.
-5. Persistencia en PostgreSQL.
-6. Restauración a demora cero.
-7. Nueva reserva `CONFIRMED`.
+```bash
+kubectl set env deployment/payment-service -n ticket-system \
+  PAYMENT_DELAY_SECONDS=20 \
+  PAYMENT_FAILURE_MODE=none \
+  PAYMENT_FAILURE_RATE=0
+
+kubectl rollout status deployment/payment-service -n ticket-system --timeout=240s
+```
+
+### Resultado final verificado
+
+```text
+Antes:
+  reserva -> CONFIRMED
+
+Durante:
+  Payment espera 20 s
+  Reservation aplica timeout a los 3 s
+  reserva -> PAYMENT_PENDING
+  inventario -> RESERVED
+  notificación -> NOT_SENT
+  fila PostgreSQL -> persistida
+
+Después:
+  PAYMENT_DELAY_SECONDS=0
+  nueva reserva -> CONFIRMED
+```
+
+Los logs de Payment mostraron explícitamente:
+
+```text
+esperara 20.000 segundos. origen=fixed
+```
+
+Los logs de Reservation mostraron la activación del fallback y la creación de la reserva `PAYMENT_PENDING`.
 
 ## Correo Perdido
 
-La implementación práctica está disponible mediante:
+La simulación está implementada aunque este escenario quedó dentro de los dos fallos teóricos de la selección oficial.
 
-```powershell
-kubectl set env deployment/notification-service -n ticket-system NOTIFICATION_FAILURE_MODE=drop NOTIFICATION_FAILURE_RATE=0
+Ejemplo:
+
+```bash
+kubectl set env deployment/notification-service -n ticket-system \
+  NOTIFICATION_FAILURE_MODE=drop \
+  NOTIFICATION_FAILURE_RATE=0
+
 kubectl rollout status deployment/notification-service -n ticket-system --timeout=240s
 ```
 
-Una reserva pagada debe terminar como `NOTIFICATION_PENDING`, sin perder el pago ni el registro. Restaurar con:
+Una reserva pagada puede conservarse como `NOTIFICATION_PENDING` sin perder el pago ni el registro.
 
-```powershell
-kubectl set env deployment/notification-service -n ticket-system NOTIFICATION_FAILURE_MODE=none NOTIFICATION_FAILURE_RATE=0.05
+Restauración:
+
+```bash
+kubectl set env deployment/notification-service -n ticket-system \
+  NOTIFICATION_FAILURE_MODE=none \
+  NOTIFICATION_FAILURE_RATE=0
+
 kubectl rollout status deployment/notification-service -n ticket-system --timeout=240s
 ```
 
-## Criterio de cierre operativo
+## Participación en la alta disponibilidad
 
-La implementación está lista. Para cerrar la evidencia deben ejecutarse todavía:
+Durante la prueba de `kubectl drain gabriel-node`, `jordy-node` mantuvo las réplicas sobrevivientes y PostgreSQL.
 
-- Publicación de las imágenes desde la cuenta autorizada.
-- Despliegue real con dos réplicas.
-- Verificación DNS.
-- Reserva normal `CONFIRMED`.
-- Pasarela Lenta `PAYMENT_PENDING`.
-- Capturas y logs indicados en `docs/EVIDENCIAS.md`.
+Se verificó desde el Gateway sobreviviente una reserva completa:
+
+```text
+Reservation   CONFIRMED
+Inventory     RESERVED
+Payment       APPROVED
+Notification  SENT
+```
+
+Esto demostró que el worker no era una VM pasiva: ejecutó el flujo completo mientras `gabriel-node` estaba retirado de la planificación.
+
+## Estado final de la parte JORDY
+
+```text
+COMPLETO  Payment Service
+COMPLETO  Notification Service
+COMPLETO  tests
+COMPLETO  imágenes Docker
+COMPLETO  manifiestos Kubernetes
+COMPLETO  K3s worker jordy-node
+COMPLETO  DNS interno
+COMPLETO  Pasarela Lenta
+COMPLETO  logs y persistencia
+COMPLETO  recuperación
+COMPLETO  participación en prueba de drain
+```
+
+## Guion corto
+
+> Mi parte implementa Payment y Notification como servicios independientes y configurables. Payment puede simular latencia o rechazo y Notification puede simular pérdida del envío. En Pasarela Lenta configuramos 20 segundos de demora; Reservation no se bloquea, aplica un timeout a los 3 segundos y persiste la reserva como PAYMENT_PENDING. Además, `jordy-node` funciona como worker real de K3s y durante el drain de Gabriel mantuvo los servicios y PostgreSQL necesarios para completar una reserva CONFIRMED.
